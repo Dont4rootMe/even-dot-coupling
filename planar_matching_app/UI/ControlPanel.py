@@ -95,13 +95,12 @@ class ControlPanel(QWidget):
         layout.addWidget(self._clear_button)
         layout.addWidget(self._load_button)
         layout.addWidget(self._save_button)
-        layout.addSpacing(15)
+        layout.addStretch()
         layout.addWidget(self._preset_group)
         layout.addWidget(self._n_points_label)
         layout.addWidget(self._n_points_slider)
         layout.addWidget(self._noise_label)
         layout.addWidget(self._noise_slider)
-        layout.addStretch()
         self.setLayout(layout)
 
     def _connect_signals(self) -> None:
