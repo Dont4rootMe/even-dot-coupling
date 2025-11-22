@@ -27,22 +27,22 @@ class ControlPanel(QWidget):
         self._engine = engine
 
         self._counts_label = QLabel("A: 0    B: 0", self)
-        self._matching_label = QLabel("Паросочетание: отсутствует", self)
+        self._matching_label = QLabel("Matching: none", self)
 
-        self._btn_a = QPushButton("A (крестик)", self)
-        self._btn_b = QPushButton("B (кружок)", self)
+        self._btn_a = QPushButton("A (cross)", self)
+        self._btn_b = QPushButton("B (circle)", self)
         self._btn_a.setCheckable(True)
         self._btn_b.setCheckable(True)
         self._btn_a.setChecked(True)
 
-        self._load_button = QPushButton("Загрузить точки…", self)
-        self._save_button = QPushButton("Сохранить точки…", self)
-        self._clear_button = QPushButton("Очистить доску", self)
-        self._compute_button = QPushButton("Вычислить паросочетание", self)
+        self._load_button = QPushButton("Load points…", self)
+        self._save_button = QPushButton("Save points…", self)
+        self._clear_button = QPushButton("Clear board", self)
+        self._compute_button = QPushButton("Compute matching", self)
 
         self._notice_label = QLabel(
-            "ЛКМ на правой доске добавляет точку в активное множество.\n"
-            "Для расчёта паросочетания множества A и B должны быть одинакового размера.",
+            "Left-click on the board adds a point to the active set.\n"
+            "A and B must contain the same number of points to compute a matching.",
             self,
         )
         self._notice_label.setWordWrap(True)
@@ -57,7 +57,7 @@ class ControlPanel(QWidget):
 
     # ------------------------------------------------------------------
     def _build_layout(self) -> None:
-        active_group = QGroupBox("Активное множество", self)
+        active_group = QGroupBox("Active set", self)
         active_layout = QHBoxLayout()
         active_layout.setSpacing(6)
         active_layout.addWidget(self._btn_a)
@@ -90,15 +90,15 @@ class ControlPanel(QWidget):
         count_a, count_b = self._engine.get_point_counts()
         self._counts_label.setText(f"A: {count_a}    B: {count_b}")
         if self._engine.has_valid_matching():
-            self._matching_label.setText("Паросочетание: готово")
+            self._matching_label.setText("Matching: ready")
         else:
-            self._matching_label.setText("Паросочетание: отсутствует")
+            self._matching_label.setText("Matching: none")
 
     def _handle_set_toggle(self, kind: int) -> None:
         try:
             self._engine.set_active_set(kind)
         except ValueError as exc:
-            QMessageBox.warning(self, "Ошибка", str(exc))
+            QMessageBox.warning(self, "Error", str(exc))
             return
 
         # Keep buttons mutually exclusive manually
@@ -113,15 +113,36 @@ class ControlPanel(QWidget):
         self._engine.clear_board()
 
     def _handle_compute(self) -> None:
+        count_a, count_b = self._engine.get_point_counts()
+        if count_a != count_b:
+            reply = QMessageBox.question(
+                self,
+                "Unbalanced sets",
+                (
+                    f"Set sizes: A={count_a}, B={count_b}.\n"
+                    "Equal sizes are required. Add missing points via KDE sampling?"
+                ),
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                try:
+                    self._engine.sample_missing_points()
+                except EngineError as exc:
+                    QMessageBox.warning(self, "Failed to add points", str(exc))
+                    return
+            else:
+                return
+
         try:
             self._engine.compute_planar_matching()
         except EngineError as exc:
-            QMessageBox.warning(self, "Невозможно вычислить", str(exc))
+            QMessageBox.warning(self, "Cannot compute", str(exc))
 
     def _handle_load(self) -> None:
         file_path, _ = QFileDialog.getOpenFileName(
             self,
-            "Открыть точки",
+            "Open points",
             "",
             "Text files (*.txt);;All files (*)",
         )
@@ -130,14 +151,14 @@ class ControlPanel(QWidget):
         try:
             self._engine.load_points_from_file(file_path)
         except ValueError as exc:
-            QMessageBox.critical(self, "Некорректные данные", str(exc))
+            QMessageBox.critical(self, "Invalid data", str(exc))
         except EngineError as exc:
-            QMessageBox.critical(self, "Ошибка загрузки", str(exc))
+            QMessageBox.critical(self, "Load error", str(exc))
 
     def _handle_save(self) -> None:
         file_path, _ = QFileDialog.getSaveFileName(
             self,
-            "Сохранить точки",
+            "Save points",
             "points.txt",
             "Text files (*.txt);;All files (*)",
         )
@@ -151,4 +172,4 @@ class ControlPanel(QWidget):
         try:
             self._engine.save_points_to_file(str(path_obj))
         except EngineError as exc:
-            QMessageBox.critical(self, "Ошибка сохранения", str(exc))
+            QMessageBox.critical(self, "Save error", str(exc))

@@ -16,7 +16,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("Планарное паросочетание")
+        self.setWindowTitle("Planar Matching")
         self._engine = Engine.instance()
 
         central = QWidget(self)

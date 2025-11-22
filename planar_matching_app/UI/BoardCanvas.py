@@ -33,7 +33,7 @@ class BoardCanvas(QWidget):
         try:
             self._engine.add_point_from_click(*normalized)
         except EngineError as exc:
-            QMessageBox.critical(self, "Ошибка", str(exc))
+            QMessageBox.critical(self, "Error", str(exc))
         finally:
             event.accept()
 

@@ -8,6 +8,7 @@ from typing import Callable
 import numpy as np
 
 from .backend import solve_complete_matching_robust
+from point_sampling import sample_auxiliary_points
 
 
 class EngineError(RuntimeError):
@@ -82,7 +83,7 @@ class Engine:
         """Add a normalized point to the active set and invalidate matching."""
 
         if not (0.0 <= x <= 1.0 and 0.0 <= y <= 1.0):
-            raise EngineError("Координаты должны быть внутри [0, 1].")
+            raise EngineError("Coordinates must be within [0, 1].")
 
         target = self._points[self._active_set]
         target.append((float(x), float(y)))
@@ -112,15 +113,15 @@ class Engine:
         n_a, n_b = points_a.shape[0], points_b.shape[0]
 
         if n_a == 0 or n_b == 0 or n_a != n_b:
-            raise EngineError("Количество точек в A и B должно совпадать и быть > 0.")
+            raise EngineError("Sets A and B must both be non-empty and have the same size.")
 
         if n_a == 0 or n_b == 0 or n_a != n_b:
-            raise EngineError("Количество точек в A и B должно совпадать и быть > 0.")
+            raise EngineError("Sets A and B must both be non-empty and have the same size.")
 
         try:
             pairs = solve_complete_matching_robust(points_a, points_b)
         except Exception as exc:
-            raise EngineError(f"Не удалось вычислить паросочетание: {exc}") from exc
+            raise EngineError(f"Failed to compute matching: {exc}") from exc
 
         segments: list[tuple[tuple[float, float], tuple[float, float]]] = []
         for idx_a, idx_b in pairs:
@@ -128,10 +129,37 @@ class Engine:
                 pa = points_a[int(idx_a)]
                 pb = points_b[int(idx_b)]
             except IndexError as exc:
-                raise EngineError("Бэкенд вернул некорректные индексы.") from exc
+                raise EngineError("Backend returned invalid indices.") from exc
             segments.append(((float(pa[0]), float(pa[1])), (float(pb[0]), float(pb[1]))))
 
         self._segments = segments
+        self.refresh()
+
+    def sample_missing_points(self) -> None:
+        """Balance point sets by sampling new points for the smaller class."""
+
+        count_a, count_b = self.get_point_counts()
+        if count_a == count_b:
+            return
+        if count_a == 0 or count_b == 0:
+            raise EngineError("Cannot generate points: one of the sets is empty.")
+
+        if count_a < count_b:
+            source = np.array(self._points[0], dtype=np.float64)
+            target = self._points[0]
+            deficit = count_b - count_a
+        else:
+            source = np.array(self._points[1], dtype=np.float64)
+            target = self._points[1]
+            deficit = count_a - count_b
+
+        sampled = sample_auxiliary_points(source, deficit)
+        # Clip to the normalized board bounds to avoid drawing outside the canvas.
+        for x, y in sampled:
+            target.append((float(np.clip(x, 0.0, 1.0)), float(np.clip(y, 0.0, 1.0))))
+
+        # Invalidate old matching.
+        self._segments = []
         self.refresh()
 
     def load_points_from_file(self, path: str) -> None:
@@ -139,7 +167,7 @@ class Engine:
 
         file_path = Path(path)
         if not file_path.exists():
-            raise EngineError("Файл не найден.")
+            raise EngineError("File not found.")
 
         loaded_a: list[tuple[float, float]] = []
         loaded_b: list[tuple[float, float]] = []
@@ -166,10 +194,10 @@ class Engine:
                     elif label == 1:
                         loaded_b.append((x_val, y_val))
         except OSError as exc:
-            raise EngineError(f"Ошибка чтения файла: {exc}") from exc
+            raise EngineError(f"Failed to read file: {exc}") from exc
 
         if len(loaded_a) != len(loaded_b):
-            raise ValueError("Число точек A и B в файле должно совпадать.")
+            raise ValueError("The number of A and B points in the file must match.")
 
         self._points = [loaded_a, loaded_b]
         self._segments = []
@@ -186,7 +214,7 @@ class Engine:
                 for x, y in self._points[1]:
                     handle.write(f"{x} {y} 1\n")
         except OSError as exc:
-            raise EngineError(f"Не удалось сохранить точки: {exc}") from exc
+            raise EngineError(f"Failed to save points: {exc}") from exc
 
     def get_point_counts(self) -> tuple[int, int]:
         """Return counts for A and B."""

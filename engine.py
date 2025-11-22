@@ -80,7 +80,7 @@ class Engine:
         self._update_points(np.empty((0, 2), dtype=np.float64))
         self._update_lines(np.empty((0, 4), dtype=np.float64))
         self._clear_layers_info()
-        self._emit_status("Доска очищена.")
+        self._emit_status("Board cleared.")
 
     def points(self) -> np.ndarray:
         """Return a copy of the current set of points."""
@@ -97,18 +97,18 @@ class Engine:
 
         candidate = np.array([x, y], dtype=np.float64)
         if not np.isfinite(candidate).all():
-            raise EngineError("Координаты точки должны быть конечными числами.")
+            raise EngineError("Point coordinates must be finite numbers.")
 
         if self._points.size:
             distances = np.linalg.norm(self._points - candidate, axis=1)
             if np.any(distances < 1.0):
-                self._emit_status("Точка слишком близко к существующей и не была добавлена.")
+                self._emit_status("Point is too close to an existing one and was not added.")
                 return False
 
         new_points = np.vstack([self._points, candidate])
         self._update_points(new_points)
         self._clear_lines_silent()
-        self._emit_status("Добавлена новая точка.")
+        self._emit_status("New point added.")
         return True
 
     def bulk_set_points(self, points: Iterable[Iterable[float]], fit_to_scene: bool = False) -> None:
@@ -124,7 +124,7 @@ class Engine:
         if array.size == 0:
             self._update_points(array)
             self._clear_lines_silent()
-            self._emit_status("Точки загружены: 0 точек.")
+            self._emit_status("Points loaded: 0 points.")
             return
 
         if fit_to_scene:
@@ -133,13 +133,13 @@ class Engine:
         filtered = self._deduplicate_points(array)
         self._update_points(filtered)
         self._clear_lines_silent()
-        self._emit_status(f"Точки загружены: {len(filtered)} точек.")
+        self._emit_status(f"Points loaded: {len(filtered)} points.")
 
     def save_points(self, path: str, overwrite: bool = True) -> None:
         """Persist the current points to a text file."""
 
         if not path:
-            raise EngineError("Некорректный путь для сохранения.")
+            raise EngineError("Invalid path for saving.")
 
         file_path = Path(path)
         mode = "w" if overwrite else "x"
@@ -148,21 +148,21 @@ class Engine:
                 for x, y in self._points:
                     handle.write(f"{x} {y}\n")
         except FileExistsError as exc:
-            raise EngineError("Файл уже существует и не может быть перезаписан.") from exc
+            raise EngineError("File already exists and cannot be overwritten.") from exc
         except OSError as exc:
-            raise EngineError(f"Не удалось сохранить точки: {exc}.") from exc
+            raise EngineError(f"Failed to save points: {exc}.") from exc
         else:
-            self._emit_status(f"Сохранено точек: {len(self._points)}.")
+            self._emit_status(f"Saved points: {len(self._points)}.")
 
     def load_points(self, path: str) -> None:
         """Load points from a text file, replacing the current set."""
 
         if not path:
-            raise EngineError("Некорректный путь для загрузки.")
+            raise EngineError("Invalid path for loading.")
 
         file_path = Path(path)
         if not file_path.exists():
-            raise EngineError("Файл не найден.")
+            raise EngineError("File not found.")
 
         loaded: List[List[float]] = []
         try:
@@ -181,7 +181,7 @@ class Engine:
                         continue
                     loaded.append([x_val, y_val])
         except OSError as exc:
-            raise EngineError(f"Не удалось загрузить точки: {exc}.") from exc
+            raise EngineError(f"Failed to load points: {exc}.") from exc
 
         array = np.array(loaded, dtype=np.float64) if loaded else np.empty((0, 2), dtype=np.float64)
         self.reset()
@@ -198,7 +198,7 @@ class Engine:
         segments, layer_sizes, duration = self._compute_convex_layers(self._points)
         self._update_lines(segments)
         self._update_layers_info(len(layer_sizes), layer_sizes, duration)
-        self._emit_status(f"Расчёт завершён: {len(segments)} отрезков.")
+        self._emit_status(f"Computation finished: {len(segments)} segments.")
         return segments.copy()
 
     def clear_lines(self) -> None:
@@ -206,7 +206,7 @@ class Engine:
 
         self._update_lines(np.empty((0, 4), dtype=np.float64))
         self._clear_layers_info()
-        self._emit_status("Отрезки удалены.")
+        self._emit_status("Segments removed.")
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -234,7 +234,7 @@ class Engine:
     def _scale_points_to_scene(self, points: np.ndarray) -> np.ndarray:
         padding = float(SCENE_SIZE) * SCENE_MARGIN_RATIO
         if padding * 2 >= SCENE_SIZE:
-            raise EngineError("Некорректная конфигурация отступов сцены.")
+            raise EngineError("Invalid scene margin configuration.")
 
         min_x = float(np.min(points[:, 0]))
         max_x = float(np.max(points[:, 0]))
@@ -245,7 +245,7 @@ class Engine:
         height = max_y - min_y
         usable = float(SCENE_SIZE) - 2 * padding
         if usable <= 0:
-            raise EngineError("Недостаточно места для отображения точек на сцене.")
+            raise EngineError("Not enough room to display points on the scene.")
 
         centered = np.empty_like(points, dtype=np.float64)
 
@@ -284,13 +284,13 @@ class Engine:
         try:
             array = np.asarray(points, dtype=np.float64)
         except (TypeError, ValueError) as exc:
-            raise EngineError("Невозможно преобразовать входные данные в массив точек.") from exc
+            raise EngineError("Cannot convert input data to a point array.") from exc
 
         if array.size == 0:
             return np.empty((0, 2), dtype=np.float64)
 
         if array.ndim != 2 or array.shape[1] != 2:
-            raise EngineError("Ожидается массив формы (n, 2) для точек.")
+            raise EngineError("Expected an array of shape (n, 2) for points.")
 
         mask = np.isfinite(array).all(axis=1)
         cleaned = array[mask]
@@ -345,7 +345,7 @@ class Engine:
         try:
             layers = convex_layers(filtered, tol=1e-12)
         except Exception as exc:  # pragma: no cover - safety net around external code
-            raise EngineError("Не удалось вычислить выпуклые слои для текущего набора точек.") from exc
+            raise EngineError("Failed to compute convex layers for the current point set.") from exc
 
         valid_layers: List[np.ndarray] = []
         for hull in layers:
@@ -353,7 +353,7 @@ class Engine:
             if hull_array.size == 0:
                 continue
             if hull_array.ndim != 2 or hull_array.shape[1] != 2:
-                raise EngineError("convex_layers вернула слой некорректной формы.")
+                raise EngineError("convex_layers returned a layer with an invalid shape.")
             if hull_array.shape[0] < 2:
                 continue
             valid_layers.append(hull_array)
@@ -394,9 +394,9 @@ class Engine:
 
         stacked = np.vstack(segments)
         if stacked.ndim != 2 or stacked.shape[1] not in (4, 7):
-            raise EngineError("convex_layers вернула недопустимый набор отрезков.")
+            raise EngineError("convex_layers returned an invalid set of segments.")
         if not np.isfinite(stacked).all():
-            raise EngineError("convex_layers вернула недопустимые значения.")
+            raise EngineError("convex_layers returned non-finite values.")
         duration = perf_counter() - start_time
         layer_sizes = [layer.shape[0] for layer in valid_layers]
 
