@@ -37,22 +37,20 @@ def _fit_to_centered_square(X: np.ndarray) -> np.ndarray:
 
 
 def get_swiss_roll(
-    n_samples: int = 1500,
+    n_samples: int = 100,
     noise: float = 0.1,
     normalize_2d: Normalize2D = "fit_square",
     dtype: np.dtype = np.float64,
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+) -> Tuple[np.ndarray, np.ndarray]:
     """
-    Generate Swiss roll and its 2D projection via PCA.
+    Generate Swiss roll 2D projection with random class assignment.
 
     Parameters
     ----------
     n_samples : int
-        Number of points.
+        Number of points per class (total will be 2*n_samples).
     noise : float
         Gaussian noise amplitude in make_swiss_roll.
-    random_state : int | None
-        RNG initialization.
     normalize_2d : {"none", "unit_square", "fit_square"}
         2D projection normalization:
         - "none": leave as-is (centered PCA).
@@ -63,9 +61,10 @@ def get_swiss_roll(
 
     Returns
     -------
-    Z2d : (n, 2) — PCA projection to plane
+    tuple[np.ndarray, np.ndarray]
+        Two arrays with randomly assigned points from the swiss roll.
     """
-    X3d, _ = make_swiss_roll(n_samples=n_samples, noise=noise)
+    X3d, _ = make_swiss_roll(n_samples=2*n_samples, noise=noise)
     X3d = np.ascontiguousarray(X3d, dtype=dtype)
 
     # Deterministic PCA (full SVD guarantees no randomness)
@@ -82,5 +81,13 @@ def get_swiss_roll(
         raise ValueError(f"Unknown normalize_2d={normalize_2d!r}")
 
     Z2d = np.ascontiguousarray(Z2d, dtype=dtype)
+    
+    # Randomly assign 50% to class A, 50% to class B
+    indices = np.arange(len(Z2d))
+    np.random.shuffle(indices)
+    mid = len(indices) // 2
+    
+    X_a = Z2d[indices[:mid]]
+    X_b = Z2d[indices[mid:]]
 
-    return Z2d
+    return X_a, X_b

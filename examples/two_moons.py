@@ -40,19 +40,19 @@ def _fit_to_centered_square(X: np.ndarray) -> np.ndarray:
 
 
 def get_two_moons(
-    n_samples: int = 500,
+    n_samples: int = 100,
     noise: float = 0.05,
     random_state: Union[int, None] = None,
     normalize: Normalize = "fit_square",
     dtype: np.dtype = np.float64,
-) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]:
+) -> Tuple[np.ndarray, np.ndarray]:
     """
-    Generate two-moons points in format (n, 2) for subsequent passing to convex_layers(...).
+    Generate two-moons dataset split into two classes.
 
     Parameters
     ---------
     n_samples : int
-        Number of points.
+        Number of points per class (total will be 2*n_samples).
     noise : float
         Gaussian noise variance (as in sklearn.datasets.make_moons).
     random_state : int | None
@@ -66,10 +66,10 @@ def get_two_moons(
 
     Returns
     -------
-    X : np.ndarray, shape (n_samples, 2)
-        Array of points.
+    tuple[np.ndarray, np.ndarray]
+        Two arrays, each shape (n_samples, 2): one moon for class A, one for class B.
     """
-    X, _ = make_moons(n_samples=n_samples, noise=noise, shuffle=True, random_state=random_state)
+    X, y = make_moons(n_samples=2*n_samples, noise=noise, shuffle=True, random_state=random_state)
 
     if normalize == "unit_square":
         X = _to_unit_square(X)
@@ -82,6 +82,10 @@ def get_two_moons(
         raise ValueError(f"Unknown normalize='{normalize}'. Choose from 'none', 'unit_square', 'fit_square'.")
 
     X = np.ascontiguousarray(X, dtype=dtype)
+    
+    # Split by moon (label 0 -> class A, label 1 -> class B)
+    X_a = X[y == 0]
+    X_b = X[y == 1]
 
-    return X
+    return X_a, X_b
 

@@ -37,7 +37,7 @@ def _apply_norm(X: np.ndarray, normalize: Normalize) -> np.ndarray:
 
 
 def get_nested_polygons(
-    n_samples: int | Sequence[int] = 200,
+    n_samples: int = 100,
     n_layers: int = 4,
     m_vertices: int | Sequence[int] = 24,
     r_min: float = 1.0,
@@ -47,15 +47,29 @@ def get_nested_polygons(
     random_state: int | None = None,
     rotate_each_layer: bool = True,
     normalize: Normalize = "fit_square",
-    return_labels: bool = False,
-) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]:
+) -> Tuple[np.ndarray, np.ndarray]:
     """
-    Nested regular polygons with light noise. Perfect benchmark for onion decomposition.
+    Nested regular polygons with alternating class labels by layer.
+    
+    Layer 0 (outermost) → class A
+    Layer 1 → class B
+    Layer 2 → class A
+    Layer 3 → class B
+    etc.
 
-    n_samples     — number of points (scalar or list of length n_layers).
-    m_vertices    — number of vertices per layer (scalar or list of length n_layers).
-    radii         — linear scale from r_min to r_max (outermost — r_max).
-    noise         — δ_r~N(0,σ_r), δ_t~N(0,σ_t) (rad).
+    Parameters
+    ----------
+    n_samples : int
+        Number of points per class (total will be ~2*n_samples depending on layer count).
+    n_layers : int
+        Number of nested polygon layers.
+    noise : float
+        Standard deviation of noise.
+    
+    Returns
+    -------
+    tuple[np.ndarray, np.ndarray]
+        Two arrays with points from alternating layers.
     """
     
     if noise <= 0.001:
@@ -65,13 +79,11 @@ def get_nested_polygons(
     sigma_radial = noise
     
     rng = np.random.default_rng(random_state)
-    n_per_layer = n_samples // n_layers
+    
+    # Calculate points per layer to achieve n_samples per class
+    total_points = 2 * n_samples
+    n_per_layer = total_points // n_layers
 
-    if isinstance(n_per_layer, int):
-        nL = [n_per_layer] * n_layers
-    else:
-        nL = list(n_per_layer)
-        assert len(nL) == n_layers
     if isinstance(m_vertices, int):
         mL = [m_vertices] * n_layers
     else:
@@ -81,10 +93,10 @@ def get_nested_polygons(
     # radii from outer to inner
     radii = np.linspace(r_max, r_min, n_layers)
 
-    Xs = []
-    ys = []
+    Xs_a = []
+    Xs_b = []
     for ℓ in range(n_layers):
-        n = int(nL[ℓ])
+        n = int(n_per_layer)
         m = int(mL[ℓ])
         rℓ = float(radii[ℓ])
         φℓ = rng.uniform(0, 2*np.pi) if rotate_each_layer else 0.0
@@ -98,17 +110,24 @@ def get_nested_polygons(
         θ = base_θ + δt
         r = rℓ + δr
         X = np.column_stack((r * np.cos(θ), r * np.sin(θ)))
-        Xs.append(X)
-        ys.append(np.full(n, ℓ, dtype=np.int32))
+        
+        # Alternate layers between classes
+        if ℓ % 2 == 0:
+            Xs_a.append(X)
+        else:
+            Xs_b.append(X)
 
-    X = np.vstack(Xs)
-    y = np.concatenate(ys)
-    X = _apply_norm(X, normalize)
-    return (X, y) if return_labels else X
+    X_a = np.vstack(Xs_a) if Xs_a else np.empty((0, 2))
+    X_b = np.vstack(Xs_b) if Xs_b else np.empty((0, 2))
+    
+    X_a = _apply_norm(X_a, normalize)
+    X_b = _apply_norm(X_b, normalize)
+    
+    return X_a, X_b
 
 
 def get_pinwheel(
-    n_samples: int = 1200,
+    n_samples: int = 100,
     n_arms: int = 5,
     radius_loc: float = 1.0,
     radius_scale: float = 0.6,
@@ -117,13 +136,29 @@ def get_pinwheel(
     noise: float = 0.02,
     random_state: int | None = None,
     normalize: Normalize = "fit_square",
-    return_labels: bool = False,
-) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]:
+) -> Tuple[np.ndarray, np.ndarray]:
     """
-    Pinwheel: curved radial "rays". Nonlinearly separable, useful for hull stability testing.
+    Pinwheel with alternating class labels by arm.
+    
+    Arm 0 → class A
+    Arm 1 → class B
+    Arm 2 → class A
+    Arm 3 → class B
+    etc.
 
-    r ~ |N(radius_loc, radius_scale)|, θ = φ_k + angle_gain * r + ε, ε ~ N(0, angle_noise),
-    x = r [cos θ, sin θ] + ξ, ξ ~ N(0, iso_noise^2 I).
+    Parameters
+    ----------
+    n_samples : int
+        Number of points per class (total will be ~2*n_samples depending on arm count).
+    n_arms : int
+        Number of pinwheel arms.
+    noise : float
+        Standard deviation of isotropic noise.
+    
+    Returns
+    -------
+    tuple[np.ndarray, np.ndarray]
+        Two arrays with points from alternating arms.
     """
     if noise <= 0.001:
         noise = 0.2
@@ -132,9 +167,13 @@ def get_pinwheel(
     iso_noise = noise
     
     rng = np.random.default_rng(random_state)
-    n_per = int(np.ceil(n_samples / n_arms))
-    Xs = []
-    ys = []
+    
+    # Calculate points per arm to achieve n_samples per class
+    total_points = 2 * n_samples
+    n_per = int(np.ceil(total_points / n_arms))
+    
+    Xs_a = []
+    Xs_b = []
     for k in range(n_arms):
         φk = 2*np.pi * k / n_arms
         r = np.abs(rng.normal(radius_loc, radius_scale, size=n_per))
@@ -143,16 +182,28 @@ def get_pinwheel(
         X = np.column_stack((r * np.cos(θ), r * np.sin(θ)))
         if iso_noise > 0:
             X += rng.normal(0.0, iso_noise, size=X.shape)
-        Xs.append(X)
-        ys.append(np.full(n_per, k, dtype=np.int32))
-    X = np.vstack(Xs)[:n_samples]
-    y = np.concatenate(ys)[:n_samples]
-    X = _apply_norm(X, normalize)
-    return (X, y) if return_labels else X
+        
+        # Alternate arms between classes
+        if k % 2 == 0:
+            Xs_a.append(X)
+        else:
+            Xs_b.append(X)
+    
+    X_a = np.vstack(Xs_a) if Xs_a else np.empty((0, 2))
+    X_b = np.vstack(Xs_b) if Xs_b else np.empty((0, 2))
+    
+    # Trim to approximately n_samples each
+    X_a = X_a[:n_samples] if len(X_a) > n_samples else X_a
+    X_b = X_b[:n_samples] if len(X_b) > n_samples else X_b
+    
+    X_a = _apply_norm(X_a, normalize)
+    X_b = _apply_norm(X_b, normalize)
+    
+    return X_a, X_b
 
 
 def get_spirals(
-    n_samples: int = 400,
+    n_samples: int = 100,
     n_arms: int = 2,
     turns: float = 1.75,
     a: float = 0.1,
@@ -161,12 +212,24 @@ def get_spirals(
     noise: float = 0.02,
     random_state: int | None = None,
     normalize: Normalize = "fit_square",
-    return_labels: bool = False,
-) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]:
+) -> Tuple[np.ndarray, np.ndarray]:
     """
-    Archimedean spirals: r(θ)=a+bθ, θ ~ U[0, 2π·turns], for each ray offset φ_j=2π j/n_arms.
+    Archimedean spirals with random class assignment.
+    
+    r(θ)=a+bθ, θ ~ U[0, 2π·turns], for each ray offset φ_j=2π j/n_arms.
+    Points are randomly assigned to class A or class B.
 
-    angle_jitter — Gaussian deviation in angle (rad), noise — deviation in radius.
+    Parameters
+    ----------
+    n_samples : int
+        Number of points per class (total will be 2*n_samples).
+    noise : float
+        Standard deviation of radial noise.
+    
+    Returns
+    -------
+    tuple[np.ndarray, np.ndarray]
+        Two arrays with randomly assigned points from spirals.
     """
     
     if noise <= 0.001:
@@ -176,10 +239,10 @@ def get_spirals(
     
     rng = np.random.default_rng(random_state)
     
-    n_per_arm = int(np.ceil(n_samples / n_arms))
+    total_points = 2 * n_samples
+    n_per_arm = int(np.ceil(total_points / n_arms))
     
     Xs = []
-    ys = []
     for j in range(n_arms):
         θ = rng.uniform(0.0, 2*np.pi*turns, size=n_per_arm)
         θ += 2*np.pi * j / n_arms
@@ -188,8 +251,15 @@ def get_spirals(
         r = np.clip(r, 0.0, None)
         X = np.column_stack((r * np.cos(θ), r * np.sin(θ)))
         Xs.append(X)
-        ys.append(np.full(n_per_arm, j, dtype=np.int32))
-    X = np.vstack(Xs)
-    y = np.concatenate(ys)
+    X = np.vstack(Xs)[:total_points]
     X = _apply_norm(X, normalize)
-    return (X, y) if return_labels else X
+    
+    # Randomly assign 50% to class A, 50% to class B
+    indices = np.arange(len(X))
+    rng.shuffle(indices)
+    mid = len(indices) // 2
+    
+    X_a = X[indices[:mid]]
+    X_b = X[indices[mid:]]
+    
+    return X_a, X_b

@@ -128,7 +128,7 @@ class Engine:
             return
 
         if fit_to_scene:
-            array = self._scale_points_to_scene(array)
+            array = self._normalize_points_to_scene(array)
 
         filtered = self._deduplicate_points(array)
         self._update_points(filtered)
@@ -155,8 +155,12 @@ class Engine:
             self._emit_status(f"Saved points: {len(self._points)}.")
 
     def load_points(self, path: str) -> None:
-        """Load points from a text file, replacing the current set."""
-
+        """Load points from a text file with automatic normalization.
+        
+        Reads all points from the file (ignoring extra columns), finds the
+        global bounding box, and scales all points to fit into the scene
+        preserving aspect ratio. No points are discarded based on distance.
+        """
         if not path:
             raise EngineError("Invalid path for loading.")
 
@@ -164,7 +168,7 @@ class Engine:
         if not file_path.exists():
             raise EngineError("File not found.")
 
-        loaded: List[List[float]] = []
+        loaded_points: List[List[float]] = []
         try:
             with file_path.open("r", encoding="utf-8") as handle:
                 for raw_line in handle:
@@ -172,25 +176,89 @@ class Engine:
                     if not line:
                         continue
                     parts = line.split()
-                    if len(parts) != 2:
+                    if len(parts) < 2:
                         continue
                     try:
+                        # Only take the first two columns as X and Y
                         x_val = float(parts[0])
                         y_val = float(parts[1])
+                        loaded_points.append([x_val, y_val])
                     except ValueError:
                         continue
-                    loaded.append([x_val, y_val])
         except OSError as exc:
             raise EngineError(f"Failed to load points: {exc}.") from exc
 
-        array = np.array(loaded, dtype=np.float64) if loaded else np.empty((0, 2), dtype=np.float64)
-        self.reset()
-        if array.size == 0:
-            self.bulk_set_points(array)
+        if not loaded_points:
+            self.reset()
+            self._emit_status("Points loaded: 0 points.")
             return
 
-        scaled = self._scale_points_to_scene(array)
-        self.bulk_set_points(scaled)
+        # Convert to numpy array
+        raw_array = np.array(loaded_points, dtype=np.float64)
+        
+        # Normalize points to fit the scene
+        normalized_array = self._normalize_points_to_scene(raw_array)
+
+        # Update state directly without deduplication
+        self._update_points(normalized_array)
+        self._clear_lines_silent()
+        self._emit_status(f"Loaded and scaled {len(normalized_array)} points.")
+
+    def _normalize_points_to_scene(self, points: np.ndarray) -> np.ndarray:
+        """Normalize arbitrary point coordinates to fit within the scene.
+        
+        Maps the bounding box of the input points to a centered rectangle
+        within the scene [0, SCENE_SIZE] x [0, SCENE_SIZE], maintaining aspect ratio
+        and applying margins.
+        """
+        if points.size == 0:
+            return points
+
+        min_x = np.min(points[:, 0])
+        max_x = np.max(points[:, 0])
+        min_y = np.min(points[:, 1])
+        max_y = np.max(points[:, 1])
+
+        width = max_x - min_x
+        height = max_y - min_y
+        
+        # Target dimensions
+        margin = float(SCENE_SIZE) * SCENE_MARGIN_RATIO
+        target_size = float(SCENE_SIZE) - 2 * margin
+        
+        if target_size <= 0:
+             raise EngineError("Scene margin is too large for the scene size.")
+
+        # Handle degenerate cases (single point, horizontal/vertical line)
+        if width == 0 and height == 0:
+            scale = 1.0
+        elif width == 0:
+            scale = target_size / height
+        elif height == 0:
+            scale = target_size / width
+        else:
+            scale = min(target_size / width, target_size / height)
+
+        # Apply scaling
+        # 1. Shift to origin (subtract min)
+        # 2. Scale
+        # 3. Center in the target area
+        
+        centered_x = (points[:, 0] - min_x) * scale
+        centered_y = (points[:, 1] - min_y) * scale
+        
+        # Calculate offsets to center the bounding box in the scene
+        final_width = width * scale
+        final_height = height * scale
+        
+        offset_x = margin + (target_size - final_width) / 2.0
+        offset_y = margin + (target_size - final_height) / 2.0
+        
+        result = np.empty_like(points)
+        result[:, 0] = centered_x + offset_x
+        result[:, 1] = centered_y + offset_y
+        
+        return result
 
     def compute_levels(self) -> np.ndarray:
         """Compute convex layer segments for the current points and update the state."""
@@ -230,55 +298,6 @@ class Engine:
             return
         self._update_lines(np.empty((0, 4), dtype=np.float64))
         self._clear_layers_info()
-
-    def _scale_points_to_scene(self, points: np.ndarray) -> np.ndarray:
-        padding = float(SCENE_SIZE) * SCENE_MARGIN_RATIO
-        if padding * 2 >= SCENE_SIZE:
-            raise EngineError("Invalid scene margin configuration.")
-
-        min_x = float(np.min(points[:, 0]))
-        max_x = float(np.max(points[:, 0]))
-        min_y = float(np.min(points[:, 1]))
-        max_y = float(np.max(points[:, 1]))
-
-        width = max_x - min_x
-        height = max_y - min_y
-        usable = float(SCENE_SIZE) - 2 * padding
-        if usable <= 0:
-            raise EngineError("Not enough room to display points on the scene.")
-
-        centered = np.empty_like(points, dtype=np.float64)
-
-        if width == 0 and height == 0:
-            centered[:, 0] = SCENE_SIZE / 2
-            centered[:, 1] = SCENE_SIZE / 2
-            return centered
-
-        if width == 0:
-            scale = usable / height if height != 0 else 1.0
-            scaled_height = height * scale
-            y_offset = padding + (usable - scaled_height) / 2
-            centered[:, 0] = SCENE_SIZE / 2
-            centered[:, 1] = (points[:, 1] - min_y) * scale + y_offset
-            return centered
-
-        if height == 0:
-            scale = usable / width if width != 0 else 1.0
-            scaled_width = width * scale
-            x_offset = padding + (usable - scaled_width) / 2
-            centered[:, 0] = (points[:, 0] - min_x) * scale + x_offset
-            centered[:, 1] = SCENE_SIZE / 2
-            return centered
-
-        scale = min(usable / width, usable / height)
-        scaled_width = width * scale
-        scaled_height = height * scale
-        x_offset = padding + (usable - scaled_width) / 2
-        y_offset = padding + (usable - scaled_height) / 2
-
-        centered[:, 0] = (points[:, 0] - min_x) * scale + x_offset
-        centered[:, 1] = (points[:, 1] - min_y) * scale + y_offset
-        return centered
 
     def _prepare_points_array(self, points: Iterable[Iterable[float]]) -> np.ndarray:
         try:

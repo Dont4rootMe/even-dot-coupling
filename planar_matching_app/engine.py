@@ -15,6 +15,9 @@ class EngineError(RuntimeError):
     """Raised when the engine cannot complete a requested operation."""
 
 
+SCENE_MARGIN_RATIO: float = 0.05
+
+
 class Engine:
     """Holds all domain state and exposes a UI-friendly API."""
 
@@ -163,14 +166,20 @@ class Engine:
         self.refresh()
 
     def load_points_from_file(self, path: str) -> None:
-        """Load normalized points from disk; balanced sets are not required."""
+        """Load points from disk, normalize them, and split by class label.
+
+        The input file may contain either two columns (x y) or three columns
+        (x y label). When the label column is missing, points are assigned to
+        set A (label 0) by default. Coordinates are automatically rescaled to
+        fit the normalized board with a small margin, so the user does not need
+        to worry about the original units.
+        """
 
         file_path = Path(path)
         if not file_path.exists():
             raise EngineError("File not found.")
 
-        loaded_a: list[tuple[float, float]] = []
-        loaded_b: list[tuple[float, float]] = []
+        raw_records: list[tuple[float, float, int]] = []
 
         try:
             with file_path.open("r", encoding="utf-8") as handle:
@@ -179,24 +188,39 @@ class Engine:
                     if not line:
                         continue
                     parts = line.split()
-                    if len(parts) != 3:
+                    if len(parts) < 2:
                         continue
                     try:
                         x_val = float(parts[0])
                         y_val = float(parts[1])
-                        label = int(parts[2])
+                        label = int(parts[2]) if len(parts) >= 3 else 0
                     except ValueError:
                         continue
-                    if not (0.0 <= x_val <= 1.0 and 0.0 <= y_val <= 1.0):
+                    if not (np.isfinite(x_val) and np.isfinite(y_val)):
                         continue
-                    if label == 0:
-                        loaded_a.append((x_val, y_val))
-                    elif label == 1:
-                        loaded_b.append((x_val, y_val))
+                    normalized_label = 0 if label not in (0, 1) else label
+                    raw_records.append((x_val, y_val, normalized_label))
         except OSError as exc:
             raise EngineError(f"Failed to read file: {exc}") from exc
 
-        self._points = [loaded_a, loaded_b]
+        if not raw_records:
+            self._points = [[], []]
+            self._segments = []
+            self.refresh()
+            return
+
+        coords = np.array([[x, y] for x, y, _ in raw_records], dtype=np.float64)
+        normalized_coords = self._normalize_coordinates(coords)
+
+        points_a: list[tuple[float, float]] = []
+        points_b: list[tuple[float, float]] = []
+        for (x_norm, y_norm), (_, _, label) in zip(normalized_coords, raw_records):
+            if label == 0:
+                points_a.append((float(x_norm), float(y_norm)))
+            else:
+                points_b.append((float(x_norm), float(y_norm)))
+
+        self._points = [points_a, points_b]
         self._segments = []
         self.refresh()
 
@@ -223,3 +247,91 @@ class Engine:
 
         expected = min(len(self._points[0]), len(self._points[1]))
         return expected > 0 and len(self._segments) == expected
+
+    def load_synthetic_dataset(
+        self, 
+        points_a: np.ndarray, 
+        points_b: np.ndarray
+    ) -> None:
+        """Load pre-generated synthetic point sets.
+        
+        Normalizes both sets together to preserve their relative positions,
+        then updates the engine state with the new points.
+        
+        Parameters
+        ----------
+        points_a : np.ndarray
+            Points for set A, shape (n, 2).
+        points_b : np.ndarray
+            Points for set B, shape (m, 2).
+        """
+        if points_a.size == 0 and points_b.size == 0:
+            self._points = [[], []]
+            self._segments = []
+            self.refresh()
+            return
+        
+        # Normalize both sets together to preserve relative positions
+        combined = np.vstack([points_a, points_b])
+        normalized = self._normalize_coordinates(combined)
+        
+        n_a = points_a.shape[0]
+        norm_a = normalized[:n_a]
+        norm_b = normalized[n_a:]
+        
+        self._points = [
+            [(float(x), float(y)) for x, y in norm_a],
+            [(float(x), float(y)) for x, y in norm_b]
+        ]
+        self._segments = []
+        self.refresh()
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    def _normalize_coordinates(self, coords: np.ndarray) -> np.ndarray:
+        """Scale arbitrary coordinates to the [0, 1]x[0, 1] board with margins."""
+
+        if coords.size == 0:
+            return coords
+
+        min_x = float(np.min(coords[:, 0]))
+        max_x = float(np.max(coords[:, 0]))
+        min_y = float(np.min(coords[:, 1]))
+        max_y = float(np.max(coords[:, 1]))
+
+        width = max_x - min_x
+        height = max_y - min_y
+
+        margin = SCENE_MARGIN_RATIO
+        usable = 1.0 - 2.0 * margin
+        if usable <= 0.0:
+            raise EngineError("Invalid board margin configuration.")
+
+        if width == 0.0 and height == 0.0:
+            centered = np.empty_like(coords)
+            centered[:, 0] = 0.5
+            centered[:, 1] = 0.5
+            return centered
+
+        if width == 0.0:
+            scale = usable / height if height != 0.0 else 1.0
+            scaled_x = np.full(coords.shape[0], 0.5)
+            scaled_y = (coords[:, 1] - min_y) * scale
+        elif height == 0.0:
+            scale = usable / width if width != 0.0 else 1.0
+            scaled_x = (coords[:, 0] - min_x) * scale
+            scaled_y = np.full(coords.shape[0], 0.5)
+        else:
+            scale = min(usable / width, usable / height)
+            scaled_x = (coords[:, 0] - min_x) * scale
+            scaled_y = (coords[:, 1] - min_y) * scale
+
+        final_width = width * scale if width != 0.0 else 0.0
+        final_height = height * scale if height != 0.0 else 0.0
+        offset_x = margin + (usable - final_width) / 2.0
+        offset_y = margin + (usable - final_height) / 2.0
+
+        normalized = np.empty_like(coords)
+        normalized[:, 0] = scaled_x + offset_x
+        normalized[:, 1] = scaled_y + offset_y
+        return normalized

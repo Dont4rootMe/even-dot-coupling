@@ -7,16 +7,24 @@ from pathlib import Path
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QFileDialog,
+    QGridLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
     QMessageBox,
     QPushButton,
+    QSlider,
     QVBoxLayout,
     QWidget,
 )
 
 from ..engine import Engine, EngineError
+from examples.centric_circles import get_centric_circles
+from examples.randomized_circles import get_randomized_circles
+from examples.two_moons import get_two_moons
+from examples.swiss_roll import get_swiss_roll
+from examples.triple_clusters import get_triple_clusters
+from examples.geometric_composition import get_spirals, get_nested_polygons, get_pinwheel
 
 
 class ControlPanel(QWidget):
@@ -39,6 +47,19 @@ class ControlPanel(QWidget):
         self._save_button = QPushButton("Save points…", self)
         self._clear_button = QPushButton("Clear board", self)
         self._compute_button = QPushButton("Compute matching", self)
+        
+        # Synthetic dataset controls
+        self._n_points_slider = QSlider(Qt.Orientation.Horizontal, self)
+        self._n_points_slider.setRange(15, 100)
+        self._n_points_slider.setValue(100)
+        self._n_points_label = QLabel("Points per class: 100", self)
+        
+        self._noise_slider = QSlider(Qt.Orientation.Horizontal, self)
+        self._noise_slider.setRange(0, 20)  # 0-2.0 with 0.01 precision
+        self._noise_slider.setValue(5)  # 0.1 default
+        self._noise_label = QLabel("Noise: 0.05", self)
+        
+        self._preset_group = self._create_preset_group()
 
         self._notice_label = QLabel(
             "Left-click on the board adds a point to the active set.\n"
@@ -74,6 +95,12 @@ class ControlPanel(QWidget):
         layout.addWidget(self._clear_button)
         layout.addWidget(self._load_button)
         layout.addWidget(self._save_button)
+        layout.addSpacing(15)
+        layout.addWidget(self._preset_group)
+        layout.addWidget(self._n_points_label)
+        layout.addWidget(self._n_points_slider)
+        layout.addWidget(self._noise_label)
+        layout.addWidget(self._noise_slider)
         layout.addStretch()
         self.setLayout(layout)
 
@@ -84,6 +111,8 @@ class ControlPanel(QWidget):
         self._save_button.clicked.connect(self._handle_save)
         self._clear_button.clicked.connect(self._handle_clear)
         self._compute_button.clicked.connect(self._handle_compute)
+        self._n_points_slider.valueChanged.connect(self._update_n_points_label)
+        self._noise_slider.valueChanged.connect(self._update_noise_label)
 
     # ------------------------------------------------------------------
     def _on_engine_refresh(self) -> None:
@@ -173,3 +202,50 @@ class ControlPanel(QWidget):
             self._engine.save_points_to_file(str(path_obj))
         except EngineError as exc:
             QMessageBox.critical(self, "Save error", str(exc))
+
+    def _create_preset_group(self) -> QGroupBox:
+        """Create group box with synthetic dataset preset buttons."""
+        presets = [
+            ("Concentric circles", get_centric_circles),
+            ("Randomized circles", get_randomized_circles),
+            ("Two moons", get_two_moons),
+            ("Swiss roll", get_swiss_roll),
+            ("Triple clusters", get_triple_clusters),
+            ("Spirals", get_spirals),
+            ("Nested polygons", get_nested_polygons),
+            ("Pinwheel", get_pinwheel),
+        ]
+        
+        group = QGroupBox("Synthetic datasets", self)
+        grid = QGridLayout()
+        grid.setSpacing(6)
+        
+        for index, (title, generator) in enumerate(presets):
+            button = QPushButton(title, group)
+            button.clicked.connect(lambda _checked=False, gen=generator: self._handle_preset(gen))
+            row = index // 2
+            column = index % 2
+            grid.addWidget(button, row, column)
+        
+        group.setLayout(grid)
+        return group
+
+    def _handle_preset(self, generator_func) -> None:
+        """Generate and load a synthetic dataset."""
+        n_points = self._n_points_slider.value()
+        noise = self._noise_slider.value() / 100.0
+        
+        try:
+            points_a, points_b = generator_func(n_samples=n_points, noise=noise)
+            self._engine.load_synthetic_dataset(points_a, points_b)
+        except Exception as exc:
+            QMessageBox.warning(self, "Generation failed", str(exc))
+
+    def _update_n_points_label(self, value: int) -> None:
+        """Update the label for the points per class slider."""
+        self._n_points_label.setText(f"Points per class: {value}")
+
+    def _update_noise_label(self, value: int) -> None:
+        """Update the label for the noise slider."""
+        noise_value = value / 100.0
+        self._noise_label.setText(f"Noise: {noise_value:.2f}")

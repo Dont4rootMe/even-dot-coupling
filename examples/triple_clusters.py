@@ -53,30 +53,26 @@ def _equilateral_triangle_centers(side: float, angle_deg: float) -> np.ndarray:
 
 
 def get_triple_clusters(
-    n_samples: int = 200,
+    n_samples: int = 100,
     noise: float = 0.4,
     side: float = 6.0,
     angle_deg: float = 0.0,
     random_state: Union[int, None] = None,
     normalize: Normalize = "fit_square",
-    return_labels: bool = False,
     dtype: np.dtype = np.float64,
     shuffle: bool = True,
-) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]:
+) -> Tuple[np.ndarray, np.ndarray]:
     """
-    Generate three clusters (centers — vertices of equilateral triangle) in 2D.
+    Generate three clusters with random class assignment.
 
     Parameters
     ----------
     n_samples : int
-        Number of points in each cluster (total n = 3 * n_per_cluster).
+        Number of points per class (total will be 2*n_samples).
     noise : float
         Gaussian noise amplitude in make_blobs.
     side : float
         Triangle side length (scale of center separation).
-    cluster_std : float | list[float] | tuple[float, ...]
-        Standard deviation for make_blobs:
-          — single number for all centers; or sequence of 3 numbers per center.
     angle_deg : float
         Triangle rotation (in degrees) counterclockwise.
     random_state : int | None
@@ -84,8 +80,6 @@ def get_triple_clusters(
     normalize : {"none","unit_square","fit_square"}
         "none" — leave as-is; "unit_square" — min–max per axis to [0,1]^2;
         "fit_square" — uniform scaling to [-1,1]^2 (default).
-    return_labels : bool
-        Also return cluster labels (0,1,2).
     dtype : np.dtype
         Number type in output point array.
     shuffle : bool
@@ -93,18 +87,16 @@ def get_triple_clusters(
 
     Returns
     -------
-    X : np.ndarray, shape (3*n_per_cluster, 2)
-        Points.
-    y : np.ndarray, shape (3*n_per_cluster,), if return_labels=True
-        Cluster labels (0/1/2).
+    tuple[np.ndarray, np.ndarray]
+        Two arrays with randomly assigned points from the three clusters.
     """
     if noise <= 0.001:
         noise = 0.4
     
     centers = _equilateral_triangle_centers(side=side, angle_deg=angle_deg)
 
-    X, y = make_blobs(
-        n_samples=n_samples,
+    X, _ = make_blobs(
+        n_samples=2*n_samples,
         n_features=2,
         centers=centers,
         cluster_std=noise,
@@ -122,6 +114,13 @@ def get_triple_clusters(
         raise ValueError("normalize must be one of {'none','unit_square','fit_square'}")
 
     X = np.ascontiguousarray(X, dtype=dtype)
-    if return_labels:
-        return X, y.astype(np.int32, copy=False)
-    return X
+    
+    # Randomly assign 50% to class A, 50% to class B
+    indices = np.arange(len(X))
+    np.random.shuffle(indices)
+    mid = len(indices) // 2
+    
+    X_a = X[indices[:mid]]
+    X_b = X[indices[mid:]]
+    
+    return X_a, X_b
