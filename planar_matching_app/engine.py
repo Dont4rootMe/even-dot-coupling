@@ -163,7 +163,7 @@ class Engine:
         self.refresh()
 
     def load_points_from_file(self, path: str) -> None:
-        """Load normalized points from disk if sets are balanced."""
+        """Load normalized points from disk; balanced sets are not required."""
 
         file_path = Path(path)
         if not file_path.exists():
@@ -195,9 +195,6 @@ class Engine:
                         loaded_b.append((x_val, y_val))
         except OSError as exc:
             raise EngineError(f"Failed to read file: {exc}") from exc
-
-        if len(loaded_a) != len(loaded_b):
-            raise ValueError("The number of A and B points in the file must match.")
 
         self._points = [loaded_a, loaded_b]
         self._segments = []
