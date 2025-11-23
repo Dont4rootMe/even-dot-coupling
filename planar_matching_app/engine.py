@@ -191,9 +191,9 @@ class Engine:
                     if len(parts) < 2:
                         continue
                     try:
-                        x_val = float(parts[0])
-                        y_val = float(parts[1])
-                        label = int(parts[2]) if len(parts) >= 3 else 0
+                        x_val = float(parts[-3])
+                        y_val = float(parts[-2])
+                        label = int(parts[-1]) if len(parts) >= 3 else 0
                     except ValueError:
                         continue
                     if not (np.isfinite(x_val) and np.isfinite(y_val)):
